@@ -1,0 +1,9 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "server",
+  "dolt_server_host": "127.0.0.1",
+  "dolt_server_port": 37965,
+  "dolt_database": "wp",
+  "project_id": "9c498c6c-65a8-4b3e-8808-e0412ddb07c2"
+}
