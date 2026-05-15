@@ -1,0 +1,6 @@
+issue_prefix: ag
+issue-prefix: ag
+dolt.auto-start: false
+export.auto: false
+gc.endpoint_origin: managed_city
+gc.endpoint_status: verified
