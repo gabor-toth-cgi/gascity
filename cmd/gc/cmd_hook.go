@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/gastownhall/gascity/internal/agent"
 	"github.com/gastownhall/gascity/internal/config"
 )
 
@@ -101,7 +102,7 @@ func cmdHookWithFormat(args []string, inject bool, hookFormat string, stdout, st
 		return 1
 	}
 
-	a, ok := resolveAgentIdentity(cfg, agentName, currentRigContext(cfg))
+	a, ok := resolveHookAgentIdentity(cfg, agentName, currentRigContext(cfg))
 	if !ok {
 		fmt.Fprintf(stderr, "gc hook: agent %q not found in config\n", agentName) //nolint:errcheck // best-effort stderr
 		return 1
@@ -156,6 +157,28 @@ func cmdHookWithFormat(args []string, inject bool, hookFormat string, stdout, st
 		return shellWorkQueryWithEnv(command, dir, queryEnv)
 	}
 	return doHook(workQuery, workDir, inject, runner, stdout, stderr)
+}
+
+func resolveHookAgentIdentity(cfg *config.City, input, rigContext string) (config.Agent, bool) {
+	for _, candidate := range hookAgentIdentityCandidates(input) {
+		if a, ok := resolveAgentIdentity(cfg, candidate, rigContext); ok {
+			return a, true
+		}
+	}
+	return config.Agent{}, false
+}
+
+func hookAgentIdentityCandidates(input string) []string {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return nil
+	}
+	candidates := []string{input}
+	unsanitized := agent.UnsanitizeQualifiedNameFromSession(input)
+	if unsanitized != "" && unsanitized != input {
+		candidates = append(candidates, unsanitized)
+	}
+	return candidates
 }
 
 // hookQueryEnv returns the full work-query environment for a hook subprocess.

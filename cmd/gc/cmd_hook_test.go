@@ -314,6 +314,59 @@ name = "worker"
 	}
 }
 
+func TestCmdHookResolvesSanitizedQualifiedAlias(t *testing.T) {
+	clearGCEnv(t)
+	disableManagedDoltRecoveryForTest(t)
+	cityDir := t.TempDir()
+	rigDir := filepath.Join(cityDir, "repos", "quotes")
+	packDir := filepath.Join(cityDir, "packs", "agenticfun")
+	if err := os.MkdirAll(filepath.Join(cityDir, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(rigDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(packDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cityDir, "city.toml"), []byte(fmt.Sprintf(`[workspace]
+name = "test-city"
+provider = "codex"
+
+[[rigs]]
+name = "quotes"
+path = %q
+
+[rigs.imports.agenticfun]
+source = "packs/agenticfun"
+`, rigDir)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(packDir, "pack.toml"), []byte(`[pack]
+name = "agenticfun"
+schema = 2
+
+[[agent]]
+name = "reviewer"
+scope = "rig"
+provider = "codex"
+work_query = "printf '%s\n' \"$GC_AGENT\""
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GC_CITY", cityDir)
+	t.Setenv("GC_ALIAS", "quotes--agenticfun__reviewer")
+
+	var stdout, stderr bytes.Buffer
+	code := cmdHookWithFormat(nil, false, "", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("cmdHookWithFormat() = %d, want 0; stderr=%s", code, stderr.String())
+	}
+	if got, want := strings.TrimSpace(stdout.String()), "quotes/agenticfun.reviewer"; got != want {
+		t.Fatalf("stdout = %q, want canonical GC_AGENT %q", got, want)
+	}
+}
+
 func TestHookInjectAlwaysExitsZero(t *testing.T) {
 	// Even on command failure, inject mode exits 0.
 	runner := func(string, string) (string, error) { return "", fmt.Errorf("command failed") }

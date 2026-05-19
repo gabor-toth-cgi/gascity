@@ -144,6 +144,48 @@ func TestCodexHookWorkDirsIncludesActiveRigPaths(t *testing.T) {
 	}
 }
 
+func TestCodexHookWorkDirsIncludesConfiguredAgentWorkDirs(t *testing.T) {
+	cityDir := t.TempDir()
+	rigDir := filepath.Join(cityDir, "repos", "quotes")
+	cfg := &config.City{
+		Workspace: config.Workspace{
+			Name:     "agenticfun",
+			Provider: "codex",
+		},
+		Rigs: []config.Rig{
+			{Name: "quotes", Path: rigDir},
+		},
+		Agents: []config.Agent{
+			{
+				Name:        "reviewer",
+				BindingName: "agenticfun",
+				Dir:         "quotes",
+				Provider:    "codex",
+				WorkDir:     ".gc/agents/{{.Rig}}/reviewer",
+			},
+			{
+				Name:        "integrator",
+				BindingName: "agenticfun",
+				Dir:         "quotes",
+				Provider:    "codex",
+				WorkDir:     ".gc/agents/{{.Rig}}/integrator",
+			},
+		},
+	}
+
+	got := codexHookWorkDirs(cityDir, cfg)
+	for _, want := range []string{
+		cityDir,
+		rigDir,
+		filepath.Join(cityDir, ".gc", "agents", "quotes", "reviewer"),
+		filepath.Join(cityDir, ".gc", "agents", "quotes", "integrator"),
+	} {
+		if !stringSliceContains(got, want) {
+			t.Fatalf("work dirs = %#v, missing %q", got, want)
+		}
+	}
+}
+
 func TestCodexHooksMissingPreCompactRejectsUnreadableAndMalformedFiles(t *testing.T) {
 	dir := t.TempDir()
 	missingPath := filepath.Join(dir, ".codex", "hooks.json")
@@ -193,4 +235,13 @@ func writeCodexHooksForDoctorTest(t *testing.T, dir, data string) {
 	if err := os.WriteFile(filepath.Join(hookDir, "hooks.json"), []byte(data), 0o644); err != nil {
 		t.Fatalf("write hooks: %v", err)
 	}
+}
+
+func stringSliceContains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

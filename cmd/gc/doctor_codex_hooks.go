@@ -12,6 +12,7 @@ import (
 	"github.com/gastownhall/gascity/internal/doctor"
 	"github.com/gastownhall/gascity/internal/fsys"
 	"github.com/gastownhall/gascity/internal/hooks"
+	workdirutil "github.com/gastownhall/gascity/internal/workdir"
 )
 
 type codexHooksDriftCheck struct {
@@ -48,7 +49,37 @@ func codexHookWorkDirs(cityPath string, cfg *config.City) []string {
 		}
 		dirs = append(dirs, rig.Path)
 	}
+	cityName := workdirutil.CityName(cityPath, cfg)
+	for _, agent := range cfg.Agents {
+		if isAgentEffectivelySuspended(cfg, &agent) || !agentUsesCodexHooks(cfg, &agent) {
+			continue
+		}
+		workDir, err := workdirutil.ResolveWorkDirPathStrict(cityPath, cityName, agent.QualifiedName(), agent, cfg.Rigs)
+		if err != nil {
+			continue
+		}
+		dirs = append(dirs, workDir)
+	}
 	return dirs
+}
+
+func agentUsesCodexHooks(cfg *config.City, agent *config.Agent) bool {
+	if cfg == nil || agent == nil {
+		return false
+	}
+	provider := strings.TrimSpace(agent.Provider)
+	if provider == "" {
+		provider = strings.TrimSpace(cfg.Workspace.Provider)
+	}
+	if config.BuiltinFamily(provider, cfg.Providers) == "codex" {
+		return true
+	}
+	for _, hookProvider := range config.ResolveInstallHooks(agent, &cfg.Workspace) {
+		if config.BuiltinFamily(strings.TrimSpace(hookProvider), cfg.Providers) == "codex" {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *codexHooksDriftCheck) Name() string { return "codex-hooks-drift" }
