@@ -90,6 +90,7 @@ func warnExternalBdOverrideDrift(stderr io.Writer, cityPath string, target execS
 
 func doBd(args []string, stdout, stderr io.Writer) int {
 	cityName, rigName, bdArgs := extractBdScopeFlags(args)
+	bdArgs = normalizeBdArgs(bdArgs)
 
 	cityPath, err := resolveBdCity(cityName)
 	if err != nil {
@@ -145,6 +146,23 @@ func doBd(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+func normalizeBdArgs(args []string) []string {
+	if len(args) == 0 || args[0] != "update" {
+		return args
+	}
+	var out []string
+	for _, arg := range args {
+		switch {
+		case arg == "--note":
+			arg = "--notes"
+		case strings.HasPrefix(arg, "--note="):
+			arg = "--notes=" + strings.TrimPrefix(arg, "--note=")
+		}
+		out = append(out, arg)
+	}
+	return out
 }
 
 func resolveBdCity(cityName string) (string, error) {

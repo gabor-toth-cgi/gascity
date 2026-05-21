@@ -571,6 +571,67 @@ esac
 	}
 }
 
+func TestGcBdUpdateNoteAliasForwardsCanonicalNotesFlag(t *testing.T) {
+	disableManagedDoltRecoveryForTest(t)
+
+	origCityFlag := cityFlag
+	origRigFlag := rigFlag
+	defer func() {
+		cityFlag = origCityFlag
+		rigFlag = origRigFlag
+	}()
+	cityFlag = ""
+	rigFlag = ""
+
+	cityDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cityDir, ".beads"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cityDir, "city.toml"), []byte(`[workspace]
+name = "demo"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	binDir := t.TempDir()
+	capture := filepath.Join(t.TempDir(), "gc-bd-note-alias.txt")
+	script := filepath.Join(binDir, "bd")
+	if err := os.WriteFile(script, []byte(`#!/bin/sh
+set -eu
+{
+  i=0
+  for arg in "$@"; do
+    i=$((i + 1))
+    printf 'arg%s=%s\n' "$i" "$arg"
+  done
+} > "${CAPTURE_PATH}"
+for arg in "$@"; do
+  if [ "$arg" = "--note" ]; then
+    exit 64
+  fi
+done
+printf '{"id":"gc-1"}\n'
+`), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("CAPTURE_PATH", capture)
+	t.Setenv("GC_CITY_PATH", cityDir)
+
+	var stdout, stderr bytes.Buffer
+	if got := doBd([]string{"update", "gc-1", "--note", "progress", "--json"}, &stdout, &stderr); got != 0 {
+		t.Fatalf("doBd() = %d, want 0; stdout=%q stderr=%q", got, stdout.String(), stderr.String())
+	}
+	data, err := os.ReadFile(capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "arg1=update\narg2=gc-1\narg3=--notes\narg4=progress\narg5=--json\n"
+	if string(data) != want {
+		t.Fatalf("bd args = %q, want %q", string(data), want)
+	}
+}
+
 func TestGcBdDoesNotAutoRouteHyphenatedFlagValue(t *testing.T) {
 	disableManagedDoltRecoveryForTest(t)
 
