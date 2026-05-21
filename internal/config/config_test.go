@@ -1615,6 +1615,58 @@ esac
 	}
 }
 
+func TestEffectiveWorkQueryTemplateContextClaimsSanitizedAssignedWork(t *testing.T) {
+	a := Agent{Name: "builder", Dir: "demo"}
+	out := runEffectiveWorkQuery(t, a, map[string]string{
+		"GC_SESSION_ID":            "session-bead",
+		"GC_SESSION_NAME":          "adhoc-live-session",
+		"GC_ALIAS":                 "adhoc-alias",
+		"GC_AGENT":                 "adhoc-live-session",
+		"GC_TEMPLATE":              "demo/builder",
+		"GC_TEMPLATE_SESSION_NAME": "demo--builder",
+		"GC_SESSION_ORIGIN":        "manual",
+	}, `#!/bin/sh
+set -eu
+case "$*" in
+  "ready --assignee=demo--builder --exclude-type=epic --json --limit=1")
+    printf '[{"id":"ga-template-assigned"}]'
+    ;;
+  *)
+    printf '[]'
+    ;;
+esac
+`)
+	if got, want := strings.TrimSpace(out), `[{"id":"ga-template-assigned"}]`; got != want {
+		t.Fatalf("template assigned work query output = %q, want %q", got, want)
+	}
+}
+
+func TestEffectiveWorkQueryTemplateContextClaimsRoutedWork(t *testing.T) {
+	a := Agent{Name: "builder", Dir: "demo"}
+	out := runEffectiveWorkQuery(t, a, map[string]string{
+		"GC_SESSION_ID":            "session-bead",
+		"GC_SESSION_NAME":          "adhoc-live-session",
+		"GC_ALIAS":                 "adhoc-alias",
+		"GC_AGENT":                 "adhoc-live-session",
+		"GC_TEMPLATE":              "demo/builder",
+		"GC_TEMPLATE_SESSION_NAME": "demo--builder",
+		"GC_SESSION_ORIGIN":        "manual",
+	}, `#!/bin/sh
+set -eu
+case "$*" in
+  "ready --metadata-field gc.routed_to=demo/builder --unassigned --exclude-type=epic --json --limit=1")
+    printf '[{"id":"ga-template-routed"}]'
+    ;;
+  *)
+    printf '[]'
+    ;;
+esac
+`)
+	if got, want := strings.TrimSpace(out), `[{"id":"ga-template-routed"}]`; got != want {
+		t.Fatalf("template routed work query output = %q, want %q", got, want)
+	}
+}
+
 func TestEffectiveSlingQueryPoolNameOverride(t *testing.T) {
 	a := Agent{
 		Name:              "dog-1",

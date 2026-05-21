@@ -367,6 +367,51 @@ work_query = "printf '%s\n' \"$GC_AGENT\""
 	}
 }
 
+func TestCmdHookSessionTemplateContextExportsTemplateSessionName(t *testing.T) {
+	clearGCEnv(t)
+	disableManagedDoltRecoveryForTest(t)
+	cityDir := t.TempDir()
+	workDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cityDir, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cityToml := `[workspace]
+name = "test-city"
+session_template = "{{.City}}--{{.Agent}}"
+
+[[agent]]
+name = "builder"
+work_query = "printf 'template_session=%s' \"$GC_TEMPLATE_SESSION_NAME\""
+`
+	if err := os.WriteFile(filepath.Join(cityDir, "city.toml"), []byte(cityToml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("GC_CITY", cityDir)
+	t.Setenv("GC_TEMPLATE", "builder")
+	t.Setenv("GC_SESSION_ID", "session-bead")
+	t.Setenv("GC_SESSION_NAME", "adhoc-live-session")
+	t.Setenv("GC_SESSION_ORIGIN", "manual")
+
+	origWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origWD) })
+	if err := os.Chdir(workDir); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := cmdHookWithFormat(nil, false, "", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("cmdHookWithFormat() = %d, want 0; stderr=%s", code, stderr.String())
+	}
+	if got, want := strings.TrimSpace(stdout.String()), "template_session=test-city--builder"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+}
+
 func TestHookInjectAlwaysExitsZero(t *testing.T) {
 	// Even on command failure, inject mode exits 0.
 	runner := func(string, string) (string, error) { return "", fmt.Errorf("command failed") }

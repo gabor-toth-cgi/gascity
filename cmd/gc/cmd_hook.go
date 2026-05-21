@@ -129,6 +129,11 @@ func cmdHookWithFormat(args []string, inject bool, hookFormat string, stdout, st
 	// names; named-session context preserves the runtime-supplied owner
 	// env while selecting the backing config through GC_TEMPLATE.
 	resolvedAgentName := a.QualifiedName()
+	templateTarget := resolvedAgentName
+	if a.PoolName != "" {
+		templateTarget = a.PoolName
+	}
+	templateSessionName := cliSessionName(cityPath, cityName, templateTarget, cfg.Workspace.SessionTemplate)
 	agentForQuery := resolvedAgentName
 	sessionForQuery := ""
 	if sessionTemplateContext {
@@ -141,11 +146,12 @@ func cmdHookWithFormat(args []string, inject bool, hookFormat string, stdout, st
 		}
 		sessionForQuery = os.Getenv("GC_SESSION_NAME")
 	} else {
-		sessionForQuery = cliSessionName(cityPath, cityName, resolvedAgentName, cfg.Workspace.SessionTemplate)
+		sessionForQuery = templateSessionName
 	}
 	overrides := hookQueryEnv(cityPath, cfg, &a)
 	overrides["GC_AGENT"] = agentForQuery
 	overrides["GC_SESSION_NAME"] = sessionForQuery
+	overrides["GC_TEMPLATE_SESSION_NAME"] = templateSessionName
 	if sessionTemplateContext {
 		overrides["GC_ALIAS"] = os.Getenv("GC_ALIAS")
 		overrides["GC_SESSION_ID"] = os.Getenv("GC_SESSION_ID")

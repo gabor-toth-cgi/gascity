@@ -2137,9 +2137,11 @@ func (a *Agent) AttachEnabled() bool {
 // three-tier query with multi-identifier assignee resolution.
 //
 // Assignee resolution order: $GC_SESSION_ID (bead ID) > $GC_SESSION_NAME
-// (tmux session name) > $GC_ALIAS (named identity / qualified name).
-// All three are checked so work is found regardless of which identifier
-// was used when assigning.
+// (tmux session name) > $GC_ALIAS (named identity / qualified name) >
+// $GC_AGENT (runtime identity) > $GC_TEMPLATE (configured template) >
+// $GC_TEMPLATE_SESSION_NAME (configured template runtime name). All are
+// checked so work is found regardless of which identifier was used when
+// assigning.
 //
 // State priority: in_progress+assigned (crash recovery) >
 // ready+assigned (pre-assigned) > ready+unassigned+routed_to (pool).
@@ -2168,22 +2170,24 @@ func (a *Agent) EffectiveWorkQuery() string {
 	if legacyTarget == "" {
 		return `sh -c '` +
 			// Tier 1: in_progress assigned to any of my identifiers (crash recovery)
-			`for id in "$GC_SESSION_ID" "$GC_SESSION_NAME" "$GC_ALIAS"; do ` +
+			`for id in "$GC_SESSION_ID" "$GC_SESSION_NAME" "$GC_ALIAS" "$GC_AGENT" "$GC_TEMPLATE" "$GC_TEMPLATE_SESSION_NAME"; do ` +
 			`[ -z "$id" ] && continue; ` +
 			`r=$(bd list --status in_progress --assignee="$id" --exclude-type=epic --json --limit=1 2>/dev/null); ` +
 			`[ -n "$r" ] && [ "$r" != "[]" ] && printf "%s" "$r" && exit 0; ` +
 			`done; ` +
 			// Tier 2: ready assigned to any of my identifiers (pre-assigned)
-			`for id in "$GC_SESSION_ID" "$GC_SESSION_NAME" "$GC_ALIAS"; do ` +
+			`for id in "$GC_SESSION_ID" "$GC_SESSION_NAME" "$GC_ALIAS" "$GC_AGENT" "$GC_TEMPLATE" "$GC_TEMPLATE_SESSION_NAME"; do ` +
 			`[ -z "$id" ] && continue; ` +
 			`r=$(bd ready --assignee="$id" --exclude-type=epic --json --limit=1 2>/dev/null); ` +
 			`[ -n "$r" ] && [ "$r" != "[]" ] && printf "%s" "$r" && exit 0; ` +
 			`done; ` +
 			// Tier 3: ready unassigned routed to this config (shared routed queue).
-			// Only ephemeral sessions and controller probes consume generic config demand.
+			// Ephemeral sessions and controller probes consume generic config
+			// demand. Other live sessions consume it only when their runtime
+			// context is explicitly bound to this configured template.
 			`case "$GC_SESSION_ORIGIN" in ` +
 			`ephemeral|"") ;; ` +
-			`*) exit 0 ;; ` +
+			`*) [ "$GC_TEMPLATE" = "` + target + `" ] || [ "$GC_AGENT" = "` + target + `" ] || exit 0 ;; ` +
 			`esac; ` +
 			`r=$(bd ready --metadata-field gc.routed_to=` + target +
 			` --unassigned --exclude-type=epic --json --limit=1 2>/dev/null); ` +
@@ -2194,7 +2198,7 @@ func (a *Agent) EffectiveWorkQuery() string {
 		// Tier 1: in_progress assigned to any of my identifiers (crash recovery).
 		// Built-in control-dispatchers also claim legacy workflow-control names so
 		// pre-rename workflows keep moving without live metadata rewrites.
-		`for id in "$GC_SESSION_ID" "$GC_SESSION_NAME" "$GC_ALIAS"; do ` +
+		`for id in "$GC_SESSION_ID" "$GC_SESSION_NAME" "$GC_ALIAS" "$GC_AGENT" "$GC_TEMPLATE" "$GC_TEMPLATE_SESSION_NAME"; do ` +
 		`[ -z "$id" ] && continue; ` +
 		`legacy=""; case "$id" in *control-dispatcher) legacy="${id%control-dispatcher}workflow-control";; esac; ` +
 		`for cand in "$id" "$legacy"; do ` +
@@ -2204,7 +2208,7 @@ func (a *Agent) EffectiveWorkQuery() string {
 		`done; ` +
 		`done; ` +
 		// Tier 2: ready assigned to any of my identifiers (pre-assigned)
-		`for id in "$GC_SESSION_ID" "$GC_SESSION_NAME" "$GC_ALIAS"; do ` +
+		`for id in "$GC_SESSION_ID" "$GC_SESSION_NAME" "$GC_ALIAS" "$GC_AGENT" "$GC_TEMPLATE" "$GC_TEMPLATE_SESSION_NAME"; do ` +
 		`[ -z "$id" ] && continue; ` +
 		`legacy=""; case "$id" in *control-dispatcher) legacy="${id%control-dispatcher}workflow-control";; esac; ` +
 		`for cand in "$id" "$legacy"; do ` +
@@ -2215,10 +2219,12 @@ func (a *Agent) EffectiveWorkQuery() string {
 		`done; ` +
 		// Tier 3: ready unassigned routed to this config (shared routed queue),
 		// then the legacy workflow-control route for pre-rename graphs.
-		// Only ephemeral sessions and controller probes consume generic config demand.
+		// Ephemeral sessions and controller probes consume generic config
+		// demand. Other live sessions consume it only when their runtime
+		// context is explicitly bound to this configured template.
 		`case "$GC_SESSION_ORIGIN" in ` +
 		`ephemeral|"") ;; ` +
-		`*) exit 0 ;; ` +
+		`*) [ "$GC_TEMPLATE" = "` + target + `" ] || [ "$GC_AGENT" = "` + target + `" ] || exit 0 ;; ` +
 		`esac; ` +
 		`r=$(bd ready --metadata-field gc.routed_to=` + target +
 		` --unassigned --exclude-type=epic --json --limit=1 2>/dev/null); ` +
