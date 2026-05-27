@@ -78,4 +78,19 @@ preserve branch metadata for recovery.
 ```bash
 gc sling "$GC_RIG/{{binding_prefix}}builder" <bead-id> --on mol-agenticfun-slice-build --nudge
 ```
+
+Do not create a separate recovery bead by default. If one is unavoidable, first
+deduplicate by source bead, branch or PR, and integration result:
+
+```bash
+gc bd list --status open --metadata-field recovery.source=<bead-id> --json
+gc bd list --status open --metadata-field recovery.branch=<branch-or-pr> --json
+gc bd list --status open --metadata-field recovery.integration=<integration-id-or-commit> --json
+```
+
+Reuse any existing match. If a new recovery bead is created, record
+`recovery.source=<bead-id>`, `recovery.branch=<branch-or-pr>`,
+`recovery.integration=<integration-id-or-commit>`, and
+`recovery.canonical=true` on the canonical recovery bead, then link or close
+duplicates instead of leaving parallel recovery owners.
 """

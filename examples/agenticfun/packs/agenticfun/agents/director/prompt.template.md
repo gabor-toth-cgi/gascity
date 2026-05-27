@@ -72,6 +72,24 @@ gc sling {{ .BindingPrefix }}hq-integrator <bead-id> --nudge
 - Preserve project rules in the bead description: acceptance criteria,
   verification commands, non-goals, and handoff expectations.
 - File discovered follow-up work as new beads instead of expanding scope.
+- For rejected integration recovery, first check whether an open recovery bead
+  already exists for the same source, branch, or integration result before
+  creating another one:
+
+```bash
+gc bd list --status open --metadata-field recovery.source=<source-bead-id> --json
+gc bd list --status open --metadata-field recovery.branch=<branch-or-pr> --json
+gc bd list --status open --metadata-field recovery.integration=<integration-id-or-commit> --json
+```
+
+  Reuse the existing recovery bead when any query finds one. If a duplicate is
+  unavoidable, mark exactly one bead with `recovery.canonical=true`, link the
+  duplicate to it in notes/dependencies, then close the duplicate:
+
+```bash
+gc bd close <duplicate-bead-id>
+```
+
 - Prefer controller orders for deterministic checks and cleanup.
 
 Agent: {{ .AgentName }}

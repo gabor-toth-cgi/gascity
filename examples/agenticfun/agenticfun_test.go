@@ -480,6 +480,53 @@ func TestWorkflowFormulasUseWakeProducingHandoffs(t *testing.T) {
 	}
 }
 
+func TestRejectedIntegrationRecoveryDeduplicatesFollowUps(t *testing.T) {
+	packDir := filepath.Join(exampleDir(), "packs", "agenticfun")
+	checks := map[string][]string{
+		filepath.Join("agents", "director", "prompt.template.md"): {
+			"gc bd list --status open",
+			"recovery.source=<source-bead-id>",
+			"recovery.branch=<branch-or-pr>",
+			"recovery.integration=<integration-id-or-commit>",
+			"recovery.canonical",
+			"gc bd close <duplicate-bead-id>",
+		},
+		filepath.Join("agents", "integrator", "prompt.template.md"): {
+			"gc bd list --status open",
+			"recovery.source=<bead-id>",
+			"recovery.branch=<branch-or-pr>",
+			"recovery.integration=<integration-id-or-commit>",
+			"recovery.canonical",
+		},
+		filepath.Join("agents", "hq-integrator", "prompt.template.md"): {
+			"gc bd list --status open",
+			"recovery.source=<bead-id>",
+			"recovery.branch=<branch-or-pr>",
+			"recovery.integration=<integration-id-or-commit>",
+			"recovery.canonical",
+		},
+		filepath.Join("formulas", "mol-agenticfun-integrate.toml"): {
+			"gc bd list --status open",
+			"recovery.source=<bead-id>",
+			"recovery.branch=<branch-or-pr>",
+			"recovery.integration=<integration-id-or-commit>",
+			"recovery.canonical",
+		},
+	}
+	for rel, wants := range checks {
+		data, err := os.ReadFile(filepath.Join(packDir, rel))
+		if err != nil {
+			t.Fatalf("ReadFile(%s): %v", rel, err)
+		}
+		text := string(data)
+		for _, want := range wants {
+			if !strings.Contains(text, want) {
+				t.Errorf("%s missing rejected-integration recovery dedupe marker %q", rel, want)
+			}
+		}
+	}
+}
+
 func TestAgenticFunCityStartsUnsuspendedForDelegation(t *testing.T) {
 	cfg := loadExpanded(t)
 	if cfg.Workspace.Suspended {
