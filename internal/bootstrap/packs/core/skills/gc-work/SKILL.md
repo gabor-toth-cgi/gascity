@@ -48,7 +48,7 @@ gc bd show <id>                           # Show bead details
 gc bd update <id> --claim                 # Claim a bead (sets assignee + in_progress)
 gc bd update <id> --status in_progress    # Update status
 gc bd update <id> --label <key>=<value>   # Add/update labels
-gc bd update <id> --note "progress..."    # Add a note
+gc bd update <id> --notes "progress..."   # Add a note
 ```
 
 ## Closing work
