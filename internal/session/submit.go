@@ -28,6 +28,18 @@ const (
 	startupDialogVerifiedKey  = "startup_dialog_verified"
 )
 
+const (
+	// MetadataLastSubmitDeliveryState records the most recent session-submit
+	// delivery state on the session bead.
+	MetadataLastSubmitDeliveryState = "last_submit_delivery_state"
+	// MetadataLastSubmitDeliveryAt records when the most recent session-submit
+	// delivery state was observed.
+	MetadataLastSubmitDeliveryAt = "last_submit_delivery_at"
+	// MetadataLastSubmitDeliveryError records the most recent session-submit
+	// delivery failure detail, or an empty string after successful delivery.
+	MetadataLastSubmitDeliveryError = "last_submit_delivery_error"
+)
+
 // SubmitIntent is the semantic delivery choice for a user message.
 type SubmitIntent string
 
@@ -43,6 +55,28 @@ const (
 	SubmitIntentInterruptNow SubmitIntent = "interrupt_now"
 )
 
+// SubmitDeliveryState is the manager's observable delivery state for a submit.
+type SubmitDeliveryState string
+
+const (
+	// SubmitDeliveryUnknown means no submit delivery state was recorded.
+	SubmitDeliveryUnknown SubmitDeliveryState = ""
+	// SubmitDeliveryDelivered means the runtime accepted the message and no
+	// post-delivery liveness failure was observed.
+	SubmitDeliveryDelivered SubmitDeliveryState = "delivered"
+	// SubmitDeliveryQueued means the message was persisted for later delivery.
+	SubmitDeliveryQueued SubmitDeliveryState = "queued"
+	// SubmitDeliveryVisibleButNotRunning means the runtime surface exists but
+	// the configured provider process was not alive after delivery.
+	SubmitDeliveryVisibleButNotRunning SubmitDeliveryState = "visible_but_not_running"
+	// SubmitDeliveryNotRunning means the runtime disappeared before delivery
+	// could be verified.
+	SubmitDeliveryNotRunning SubmitDeliveryState = "not_running"
+	// SubmitDeliveryFailed means submit delivery failed before the runtime
+	// accepted the message.
+	SubmitDeliveryFailed SubmitDeliveryState = "failed"
+)
+
 // SubmissionCapabilities describes which submit intents a session can honor.
 type SubmissionCapabilities struct {
 	SupportsFollowUp     bool `json:"supports_follow_up"`
@@ -51,7 +85,8 @@ type SubmissionCapabilities struct {
 
 // SubmitOutcome reports whether a submit was delivered now or queued.
 type SubmitOutcome struct {
-	Queued bool
+	Queued        bool
+	DeliveryState SubmitDeliveryState
 }
 
 // SubmissionCapabilitiesForMetadata derives runtime submit affordances from
@@ -97,7 +132,9 @@ func (m *Manager) submit(ctx context.Context, id, message, resumeCommand string,
 				return ErrInteractionUnsupported
 			}
 			if State(b.Metadata["state"]) == StateSuspended || !m.sp.IsRunning(sessName) {
-				return m.sendLocked(ctx, id, b, sessName, message, resumeCommand, hints, true)
+				state, err := m.deliverSubmitLocked(ctx, b.ID, b, sessName, message, resumeCommand, hints, true)
+				outcome.DeliveryState = state
+				return err
 			}
 			if err := m.pendingInteractionLocked(sessName); err != nil {
 				return err
@@ -106,9 +143,19 @@ func (m *Manager) submit(ctx context.Context, id, message, resumeCommand string,
 				return err
 			}
 			outcome.Queued = true
-			return nil
+			outcome.DeliveryState = SubmitDeliveryQueued
+			return m.recordSubmitDeliveryLocked(b.ID, &b, SubmitDeliveryQueued, nil)
 		case SubmitIntentInterruptNow:
-			return m.interruptAndSubmitLocked(ctx, id, b, sessName, message, resumeCommand, hints)
+			if err := m.interruptAndSubmitLocked(ctx, id, b, sessName, message, resumeCommand, hints); err != nil {
+				outcome.DeliveryState = SubmitDeliveryFailed
+				if recordErr := m.recordSubmitDeliveryLocked(b.ID, &b, SubmitDeliveryFailed, err); recordErr != nil {
+					return errors.Join(err, recordErr)
+				}
+				return err
+			}
+			state, err := m.recordSubmitDeliveryAfterSendLocked(b.ID, &b, sessName, hints)
+			outcome.DeliveryState = state
+			return err
 		default:
 			running := m.sp.IsRunning(sessName)
 			if (State(b.Metadata["state"]) == StateStartPending || State(b.Metadata["state"]) == StateCreating) && !running {
@@ -116,13 +163,79 @@ func (m *Manager) submit(ctx context.Context, id, message, resumeCommand string,
 					return err
 				}
 				outcome.Queued = true
-				return nil
+				outcome.DeliveryState = SubmitDeliveryQueued
+				return m.recordSubmitDeliveryLocked(b.ID, &b, SubmitDeliveryQueued, nil)
 			}
 			resuming := State(b.Metadata["state"]) == StateSuspended || !running
-			return m.sendLocked(ctx, id, b, sessName, message, resumeCommand, hints, usesImmediateDefaultSubmit(b, resuming))
+			state, err := m.deliverSubmitLocked(ctx, b.ID, b, sessName, message, resumeCommand, hints, usesImmediateDefaultSubmit(b, resuming))
+			outcome.DeliveryState = state
+			return err
 		}
 	})
 	return outcome, err
+}
+
+func (m *Manager) deliverSubmitLocked(ctx context.Context, id string, b beads.Bead, sessName, message, resumeCommand string, hints runtime.Config, immediate bool) (SubmitDeliveryState, error) {
+	if err := m.sendLocked(ctx, id, b, sessName, message, resumeCommand, hints, immediate); err != nil {
+		if recordErr := m.recordSubmitDeliveryLocked(id, &b, SubmitDeliveryFailed, err); recordErr != nil {
+			return SubmitDeliveryFailed, errors.Join(err, recordErr)
+		}
+		return SubmitDeliveryFailed, err
+	}
+	return m.recordSubmitDeliveryAfterSendLocked(id, &b, sessName, hints)
+}
+
+func (m *Manager) recordSubmitDeliveryAfterSendLocked(id string, b *beads.Bead, sessName string, hints runtime.Config) (SubmitDeliveryState, error) {
+	state, deliveryErr := m.submitDeliveryStateAfterSendLocked(*b, sessName, hints)
+	if recordErr := m.recordSubmitDeliveryLocked(id, b, state, deliveryErr); recordErr != nil {
+		if deliveryErr != nil {
+			return state, errors.Join(deliveryErr, recordErr)
+		}
+		return state, recordErr
+	}
+	return state, deliveryErr
+}
+
+func (m *Manager) submitDeliveryStateAfterSendLocked(b beads.Bead, sessName string, hints runtime.Config) (SubmitDeliveryState, error) {
+	if transportFromMetadata(b) == "acp" || providerKind(b) != "codex" {
+		return SubmitDeliveryDelivered, nil
+	}
+	liveness := runtime.ObserveLiveness(m.sp, sessName, hints.ProcessNames)
+	switch {
+	case liveness.Running && !liveness.Alive:
+		return SubmitDeliveryVisibleButNotRunning, fmt.Errorf("%w: submit delivery to %s visible but provider process is not running", ErrSessionInactive, sessName)
+	case !liveness.Running:
+		return SubmitDeliveryNotRunning, fmt.Errorf("%w: submit delivery to %s runtime is not running", ErrSessionInactive, sessName)
+	default:
+		return SubmitDeliveryDelivered, nil
+	}
+}
+
+func (m *Manager) recordSubmitDeliveryLocked(id string, b *beads.Bead, state SubmitDeliveryState, deliveryErr error) error {
+	if strings.TrimSpace(id) == "" {
+		return nil
+	}
+	errText := ""
+	if deliveryErr != nil {
+		errText = deliveryErr.Error()
+	}
+	batch := map[string]string{
+		MetadataLastSubmitDeliveryState: string(state),
+		MetadataLastSubmitDeliveryAt:    time.Now().UTC().Format(time.RFC3339Nano),
+		MetadataLastSubmitDeliveryError: errText,
+	}
+	if err := m.store.SetMetadataBatch(id, batch); err != nil {
+		return fmt.Errorf("recording submit delivery state: %w", err)
+	}
+	if b != nil {
+		if b.Metadata == nil {
+			b.Metadata = make(map[string]string, len(batch))
+		}
+		for k, v := range batch {
+			b.Metadata[k] = v
+		}
+	}
+	return nil
 }
 
 func (m *Manager) supportsFollowUpLocked(b beads.Bead) bool {

@@ -260,6 +260,76 @@ func TestSubmitDefaultCodexSkipsDeferredDialogsAfterVerification(t *testing.T) {
 	}
 }
 
+func TestSubmitDefaultCodexRecordsDeliveredState(t *testing.T) {
+	store := beads.NewMemStore()
+	sp := runtime.NewFake()
+	mgr := NewManager(store, sp)
+
+	info, err := mgr.Create(context.Background(), "helper", "", "codex", t.TempDir(), "codex", nil, ProviderResume{}, runtime.Config{ProcessNames: []string{"codex"}})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	outcome, err := mgr.Submit(context.Background(), info.ID, "hello", BuildResumeCommand(info), runtime.Config{WorkDir: info.WorkDir, ProcessNames: []string{"codex"}}, SubmitIntentDefault)
+	if err != nil {
+		t.Fatalf("Submit(default): %v", err)
+	}
+	if got, want := outcome.DeliveryState, SubmitDeliveryDelivered; got != want {
+		t.Fatalf("DeliveryState = %q, want %q", got, want)
+	}
+
+	updated, err := store.Get(info.ID)
+	if err != nil {
+		t.Fatalf("Get updated bead: %v", err)
+	}
+	if got, want := updated.Metadata[MetadataLastSubmitDeliveryState], string(SubmitDeliveryDelivered); got != want {
+		t.Fatalf("%s = %q, want %q", MetadataLastSubmitDeliveryState, got, want)
+	}
+	if got := updated.Metadata[MetadataLastSubmitDeliveryAt]; got == "" {
+		t.Fatalf("%s is empty, want timestamp", MetadataLastSubmitDeliveryAt)
+	}
+	if got := updated.Metadata[MetadataLastSubmitDeliveryError]; got != "" {
+		t.Fatalf("%s = %q, want empty", MetadataLastSubmitDeliveryError, got)
+	}
+}
+
+func TestSubmitDefaultCodexReportsVisibleButNotRunningDeliveryFailure(t *testing.T) {
+	store := beads.NewMemStore()
+	sp := runtime.NewFake()
+	mgr := NewManager(store, sp)
+
+	info, err := mgr.Create(context.Background(), "helper", "", "codex", t.TempDir(), "codex", nil, ProviderResume{}, runtime.Config{ProcessNames: []string{"codex"}})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	sp.Zombies[info.SessionName] = true
+
+	outcome, err := mgr.Submit(context.Background(), info.ID, "hello", BuildResumeCommand(info), runtime.Config{WorkDir: info.WorkDir, ProcessNames: []string{"codex"}}, SubmitIntentDefault)
+	if err == nil {
+		t.Fatal("Submit(default) error = nil, want delivery failure")
+	}
+	if !errors.Is(err, ErrSessionInactive) {
+		t.Fatalf("Submit(default) error = %v, want ErrSessionInactive", err)
+	}
+	if !strings.Contains(err.Error(), "visible but provider process is not running") {
+		t.Fatalf("Submit(default) error = %v, want visible-but-not-running diagnostic", err)
+	}
+	if got, want := outcome.DeliveryState, SubmitDeliveryVisibleButNotRunning; got != want {
+		t.Fatalf("DeliveryState = %q, want %q", got, want)
+	}
+
+	updated, err := store.Get(info.ID)
+	if err != nil {
+		t.Fatalf("Get updated bead: %v", err)
+	}
+	if got, want := updated.Metadata[MetadataLastSubmitDeliveryState], string(SubmitDeliveryVisibleButNotRunning); got != want {
+		t.Fatalf("%s = %q, want %q", MetadataLastSubmitDeliveryState, got, want)
+	}
+	if got := updated.Metadata[MetadataLastSubmitDeliveryError]; !strings.Contains(got, "visible but provider process is not running") {
+		t.Fatalf("%s = %q, want visible-but-not-running diagnostic", MetadataLastSubmitDeliveryError, got)
+	}
+}
+
 func TestSubmitDefaultResumesSuspendedGeminiSessionAndNudgesImmediately(t *testing.T) {
 	store := beads.NewMemStore()
 	sp := runtime.NewFake()
@@ -415,6 +485,9 @@ func TestSubmitFollowUpQueuesDeferredMessageAndStartsCodexPoller(t *testing.T) {
 	if !outcome.Queued {
 		t.Fatal("Submit(follow_up) should report queued")
 	}
+	if got, want := outcome.DeliveryState, SubmitDeliveryQueued; got != want {
+		t.Fatalf("DeliveryState = %q, want %q", got, want)
+	}
 	state, err := nudgequeue.LoadState(cityPath)
 	if err != nil {
 		t.Fatalf("LoadState: %v", err)
@@ -434,6 +507,13 @@ func TestSubmitFollowUpQueuesDeferredMessageAndStartsCodexPoller(t *testing.T) {
 	}
 	if pollerCalls != 1 {
 		t.Fatalf("pollerCalls = %d, want 1", pollerCalls)
+	}
+	updated, err := store.Get(info.ID)
+	if err != nil {
+		t.Fatalf("Get updated bead: %v", err)
+	}
+	if got, want := updated.Metadata[MetadataLastSubmitDeliveryState], string(SubmitDeliveryQueued); got != want {
+		t.Fatalf("%s = %q, want %q", MetadataLastSubmitDeliveryState, got, want)
 	}
 }
 
