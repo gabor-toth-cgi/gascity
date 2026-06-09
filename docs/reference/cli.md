@@ -253,7 +253,8 @@ the rig automatically from the --rig flag or by detecting the bead prefix
 in the arguments.
 
 All arguments after "gc bd" are forwarded to bd unchanged, except the
-gc-only "heartbeat &lt;issue-id&gt;" subcommand, which rewrites to
+compatibility alias "update &lt;issue-id&gt; --note", which forwards to bd's
+canonical "--notes" flag, and the gc-only "heartbeat &lt;issue-id&gt;", which rewrites to
 "update &lt;issue-id&gt; --set-metadata gc.last_heartbeat_at=&lt;RFC3339 UTC now&gt;"
 so long-running workers can signal liveness to the dashboard, and
 "release-if-current &lt;issue-id&gt; &lt;assignee&gt;", which conditionally resets an

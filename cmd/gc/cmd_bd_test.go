@@ -677,6 +677,88 @@ printf '[{"id":"gc-1","title":"ok"}]\n'
 	}
 }
 
+func TestGcBdUpdateNoteAliasForwardsCanonicalNotesFlag(t *testing.T) {
+	disableManagedDoltRecoveryForTest(t)
+
+	origCityFlag := cityFlag
+	origRigFlag := rigFlag
+	defer func() {
+		cityFlag = origCityFlag
+		rigFlag = origRigFlag
+	}()
+	cityFlag = ""
+	rigFlag = ""
+
+	cityDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cityDir, ".beads"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cityDir, "city.toml"), []byte(`[workspace]
+name = "demo"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	binDir := t.TempDir()
+	captureDir := t.TempDir()
+	script := filepath.Join(binDir, "bd")
+	if err := os.WriteFile(script, []byte(`#!/bin/sh
+set -eu
+{
+  i=0
+  for arg in "$@"; do
+    i=$((i + 1))
+    printf 'arg%s=%s\n' "$i" "$arg"
+  done
+} > "${CAPTURE_PATH}"
+for arg in "$@"; do
+  case "$arg" in
+    --note|--note=*) exit 64 ;;
+  esac
+done
+printf '{"id":"gc-1"}\n'
+`), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("GC_CITY_PATH", cityDir)
+
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "separate",
+			args: []string{"update", "gc-1", "--note", "progress", "--json"},
+			want: "arg1=update\narg2=gc-1\narg3=--notes\narg4=progress\narg5=--json\n",
+		},
+		{
+			name: "equals",
+			args: []string{"update", "gc-1", "--note=progress", "--json"},
+			want: "arg1=update\narg2=gc-1\narg3=--notes=progress\narg4=--json\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			capture := filepath.Join(captureDir, tt.name+".txt")
+			t.Setenv("CAPTURE_PATH", capture)
+
+			var stdout, stderr bytes.Buffer
+			if got := doBd(tt.args, &stdout, &stderr); got != 0 {
+				t.Fatalf("doBd() = %d, want 0; stdout=%q stderr=%q", got, stdout.String(), stderr.String())
+			}
+			data, err := os.ReadFile(capture)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(data) != tt.want {
+				t.Fatalf("bd args = %q, want %q", string(data), tt.want)
+			}
+		})
+	}
+}
+
 func TestGcBdDoesNotAutoRouteHyphenatedFlagValue(t *testing.T) {
 	disableManagedDoltRecoveryForTest(t)
 

@@ -79,7 +79,8 @@ the rig automatically from the --rig flag or by detecting the bead prefix
 in the arguments.
 
 All arguments after "gc bd" are forwarded to bd unchanged, except the
-gc-only "heartbeat <issue-id>" subcommand, which rewrites to
+compatibility alias "update <issue-id> --note", which forwards to bd's
+canonical "--notes" flag, and the gc-only "heartbeat <issue-id>", which rewrites to
 "update <issue-id> --set-metadata gc.last_heartbeat_at=<RFC3339 UTC now>"
 so long-running workers can signal liveness to the dashboard, and
 "release-if-current <issue-id> <assignee>", which conditionally resets an
@@ -193,6 +194,7 @@ func doBd(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "gc bd: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
+	bdArgs = normalizeBdArgs(bdArgs)
 
 	cityPath, err := resolveBdCity(cityName)
 	if err != nil {
@@ -297,6 +299,23 @@ func doBd(args []string, stdout, stderr io.Writer) int {
 	}
 
 	return 0
+}
+
+func normalizeBdArgs(args []string) []string {
+	if len(args) == 0 || args[0] != "update" {
+		return args
+	}
+	out := make([]string, 0, len(args))
+	for _, arg := range args {
+		switch {
+		case arg == "--note":
+			arg = "--notes"
+		case strings.HasPrefix(arg, "--note="):
+			arg = "--notes=" + strings.TrimPrefix(arg, "--note=")
+		}
+		out = append(out, arg)
+	}
+	return out
 }
 
 func parseBdReleaseIfCurrentArgs(args []string) (id, expectedAssignee string, ok bool, err error) {
